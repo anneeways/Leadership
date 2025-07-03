@@ -230,33 +230,46 @@ def get_ai_insights(results, params):
     if not groq_client:
         return "AI insights unavailable (Groq API key not configured)"
     
-    try:
-        prompt = f"""
-        Analyze this leadership development program ROI calculation and provide insights:
-        
-        Program Details:
-        - Participants: {params['participants']}
-        - Duration: {params['program_duration']} months
-        - Investment: {format_currency(results['costs']['total'])}
-        
-        Key Metrics:
-        - ROI: {results['kpis']['roi']:.1f}%
-        - Payback: {results['kpis']['payback_months']:.1f} months
-        - NPV: {format_currency(results['kpis']['npv'])}
-        
-        Provide 3-4 bullet points with actionable insights and recommendations.
-        Focus on business value, risk mitigation, and optimization opportunities.
-        """
-        
-        response = groq_client.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
-            model="mixtral-8x7b-32768",
-            max_tokens=500
-        )
-        
-        return response.choices[0].message.content
-    except Exception as e:
-        return f"AI insights unavailable: {str(e)}"
+    # List of models to try in order of preference
+    models_to_try = [
+        "llama3-70b-8192",
+        "llama3-8b-8192", 
+        "gemma-7b-it",
+        "llama3-groq-70b-8192-tool-use-preview"
+    ]
+    
+    prompt = f"""
+    Analyze this leadership development program ROI calculation and provide insights:
+    
+    Program Details:
+    - Participants: {params['participants']}
+    - Duration: {params['program_duration']} months
+    - Investment: {format_currency(results['costs']['total'])}
+    
+    Key Metrics:
+    - ROI: {results['kpis']['roi']:.1f}%
+    - Payback: {results['kpis']['payback_months']:.1f} months
+    - NPV: {format_currency(results['kpis']['npv'])}
+    
+    Provide 3-4 bullet points with actionable insights and recommendations.
+    Focus on business value, risk mitigation, and optimization opportunities.
+    """
+    
+    for model in models_to_try:
+        try:
+            response = groq_client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model=model,
+                max_tokens=500
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            if "model_decommissioned" in str(e) or "not found" in str(e):
+                continue  # Try next model
+            else:
+                return f"AI insights unavailable: {str(e)}"
+    
+    return "AI insights unavailable: All models are currently unavailable"
 
 def main():
     # Header
