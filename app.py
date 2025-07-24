@@ -204,11 +204,67 @@ def calculate_roi(params):
     roi = (net_benefit / total_program_costs) * 100 if total_program_costs > 0 else 0
     payback_months = (total_program_costs / (total_annual_benefits / 12)) if total_annual_benefits > 0 else float('inf')
     
-    # NPV calculation (8% discount rate)
-    discount_rate = 0.08
+    # NPV calculation with configurable discount rate
+    discount_rate = params['discount_rate'] / 100
     npv = -total_program_costs
+    
+    # Calculate cash flows for each year
+    cash_flows = [-total_program_costs]
     for year in range(1, params['analysis_years'] + 1):
-        npv += total_annual_benefits / ((1 + discount_rate) ** year)
+        # Adjust for inflation if needed
+        inflation_factor = (1 + params['inflation_rate'] / 100) ** year
+        adjusted_benefits = total_annual_benefits * inflation_factor
+        npv += adjusted_benefits / ((1 + discount_rate) ** year)
+        cash_flows.append(adjusted_benefits)
+    
+    # Calculate IRR (Internal Rate of Return)
+    def calculate_irr(cash_flows, max_iter=100, precision=1e-6):
+        """Calculate IRR using Newton-Raphson method"""
+        if sum(cash_flows) <= 0:
+            return None
+        
+        rate = 0.1  # Initial guess
+        for _ in range(max_iter):
+            npv_val = sum(cf / (1 + rate) ** i for i, cf in enumerate(cash_flows))
+            if abs(npv_val) < precision:
+                return rate * 100
+            
+            # Derivative for Newton-Raphson
+            derivative = sum(-i * cf / (1 + rate) ** (i + 1) for i, cf in enumerate(cash_flows))
+            if abs(derivative) < precision:
+                break
+            
+            rate = rate - npv_val / derivative
+            
+            if rate < -0.99:  # Prevent negative rates that are too extreme
+                rate = -0.99
+        
+        return rate * 100 if rate > -1 else None
+    
+    irr = calculate_irr(cash_flows)
+    
+    # MIRR (Modified Internal Rate of Return)
+    def calculate_mirr(cash_flows, finance_rate, reinvest_rate):
+        """Calculate MIRR"""
+        n = len(cash_flows) - 1
+        
+        # Present value of negative cash flows (costs)
+        pv_costs = sum(cf / (1 + finance_rate) ** i for i, cf in enumerate(cash_flows) if cf < 0)
+        
+        # Future value of positive cash flows (benefits)
+        fv_benefits = sum(cf * (1 + reinvest_rate) ** (n - i) for i, cf in enumerate(cash_flows) if cf > 0)
+        
+        if abs(pv_costs) < 1e-6 or fv_benefits < 1e-6:
+            return None
+            
+        mirr = ((fv_benefits / abs(pv_costs)) ** (1/n) - 1) * 100
+        return mirr
+    
+    mirr = calculate_mirr(cash_flows, discount_rate, discount_rate)
+    
+    # Profitability Index
+    present_value_benefits = sum(cash_flows[i] / (1 + discount_rate) ** i for i in range(1, len(cash_flows)))
+    profitability_index = present_value_benefits / total_program_costs if total_program_costs > 0 else 0
     
     benefit_cost_ratio = total_benefits / total_program_costs if total_program_costs > 0 else 0
     
@@ -237,7 +293,11 @@ def calculate_roi(params):
             'payback_months': payback_months,
             'npv': npv,
             'net_benefit': net_benefit,
-            'benefit_cost_ratio': benefit_cost_ratio
+            'benefit_cost_ratio': benefit_cost_ratio,
+            'irr': irr,
+            'mirr': mirr,
+            'profitability_index': profitability_index,
+            'cash_flows': cash_flows
         }
     }
 
@@ -452,7 +512,10 @@ def generate_pdf_report(params, results):
         ['Return on Investment', f"{results['kpis']['roi']:.0f}%", roi_status.replace('🟢 ', '').replace('🟡 ', '').replace('🟠 ', '').replace('🔴 ', '')],
         ['Payback Period', f"{results['kpis']['payback_months']:.1f} months", payback_status.replace('🟢 ', '').replace('🟡 ', '').replace('🟠 ', '').replace('🔴 ', '')],
         ['Net Present Value', format_currency(results['kpis']['npv']), 'Positive' if results['kpis']['npv'] > 0 else 'Negative'],
-        ['Benefit-Cost Ratio', f"{results['kpis']['benefit_cost_ratio']:.1f}:1", 'Strong' if results['kpis']['benefit_cost_ratio'] >= 3 else 'Moderate' if results['kpis']['benefit_cost_ratio'] >= 2 else 'Weak']
+        ['Benefit-Cost Ratio', f"{results['kpis']['benefit_cost_ratio']:.1f}:1", 'Strong' if results['kpis']['benefit_cost_ratio'] >= 3 else 'Moderate' if results['kpis']['benefit_cost_ratio'] >= 2 else 'Weak'],
+        ['Internal Rate of Return', f"{results['kpis']['irr']:.1f}%" if results['kpis']['irr'] else 'N/A', 'Above Hurdle' if results['kpis']['irr'] and results['kpis']['irr'] > params['discount_rate'] else 'Below Hurdle'],
+        ['Modified IRR', f"{results['kpis']['mirr']:.1f}%" if results['kpis']['mirr'] else 'N/A', 'Excellent' if results['kpis']['mirr'] and results['kpis']['mirr'] >= 20 else 'Good'],
+        ['Profitability Index', f"{results['kpis']['profitability_index']:.2f}", 'Excellent' if results['kpis']['profitability_index'] >= 1.5 else 'Good']
     ]
     
     kpi_table = Table(kpi_data)
@@ -468,6 +531,35 @@ def generate_pdf_report(params, results):
     ]))
     
     story.append(kpi_table)
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Financial Methodology
+    story.append(Paragraph("Financial Methodology", heading_style))
+    
+    methodology_text = f"""
+    <b>Key Financial Assumptions:</b><br/>
+    • Discount Rate (Cost of Capital): {params['discount_rate']:.1f}%<br/>
+    • Expected Inflation Rate: {params['inflation_rate']:.1f}%<br/>
+    • Corporate Tax Rate: {params['tax_rate']:.1f}%<br/>
+    • Analysis Period: {params['analysis_years']} years<br/><br/>
+    
+    <b>Calculation Methods:</b><br/>
+    • <b>ROI:</b> (Total Benefits - Total Costs) / Total Costs × 100%<br/>
+    • <b>NPV:</b> Sum of discounted cash flows minus initial investment<br/>
+    • <b>IRR:</b> Discount rate that makes NPV equal to zero<br/>
+    • <b>MIRR:</b> Modified IRR assuming reinvestment at cost of capital<br/>
+    • <b>Profitability Index:</b> Present value of benefits / Initial investment<br/>
+    • <b>Payback Period:</b> Time to recover initial investment<br/><br/>
+    
+    <b>Benefit Categories:</b><br/>
+    • Productivity improvements from enhanced leadership skills<br/>
+    • Retention savings from reduced turnover<br/>
+    • Team performance gains from better management<br/>
+    • Accelerated promotion readiness<br/>
+    • Improved decision-making quality<br/>
+    """
+    
+    story.append(Paragraph(methodology_text, styles['Normal']))
     story.append(Spacer(1, 0.3*inch))
     
     # Recommendations
@@ -595,29 +687,77 @@ def generate_powerpoint_report(params, results):
     table.cell(4, 1).text = f"{results['kpis']['benefit_cost_ratio']:.1f}:1"
     
     # Slide 5: Key Performance Indicators
+    slide = prs.slides.add_slide(prs.slide_layouts[5])  # Blank layout
+    shapes = slide.shapes
+    
+    # Add title
+    title_shape = shapes.add_textbox(Inches(0.5), Inches(0.5), Inches(9), Inches(1))
+    title_frame = title_shape.text_frame
+    title_frame.text = "Key Performance Indicators"
+    title_frame.paragraphs[0].font.size = Pt(32)
+    title_frame.paragraphs[0].font.bold = True
+    
+    # Add KPI table
+    rows = 8
+    cols = 2
+    left = Inches(1)
+    top = Inches(1.5)
+    width = Inches(8)
+    height = Inches(5)
+    
+    table = shapes.add_table(rows, cols, left, top, width, height).table
+    
+    # Table headers
+    table.cell(0, 0).text = 'Financial Metric'
+    table.cell(0, 1).text = 'Value'
+    
+    # Table data
+    table.cell(1, 0).text = 'Return on Investment (ROI)'
+    table.cell(1, 1).text = f"{results['kpis']['roi']:.0f}%"
+    
+    table.cell(2, 0).text = 'Net Present Value (NPV)'
+    table.cell(2, 1).text = format_currency(results['kpis']['npv'])
+    
+    table.cell(3, 0).text = 'Payback Period'
+    table.cell(3, 1).text = f"{results['kpis']['payback_months']:.1f} months"
+    
+    table.cell(4, 0).text = 'Internal Rate of Return (IRR)'
+    table.cell(4, 1).text = f"{results['kpis']['irr']:.1f}%" if results['kpis']['irr'] else 'N/A'
+    
+    table.cell(5, 0).text = 'Modified IRR (MIRR)'
+    table.cell(5, 1).text = f"{results['kpis']['mirr']:.1f}%" if results['kpis']['mirr'] else 'N/A'
+    
+    table.cell(6, 0).text = 'Benefit-Cost Ratio'
+    table.cell(6, 1).text = f"{results['kpis']['benefit_cost_ratio']:.1f}:1"
+    
+    table.cell(7, 0).text = 'Profitability Index'
+    table.cell(7, 1).text = f"{results['kpis']['profitability_index']:.2f}"
+    
+    # Slide 6: Financial Methodology
     slide = prs.slides.add_slide(bullet_slide_layout)
     shapes = slide.shapes
     
     title_shape = shapes.title
     body_shape = shapes.placeholders[1]
     
-    title_shape.text = 'Key Performance Indicators'
+    title_shape.text = 'Financial Methodology'
     
     tf = body_shape.text_frame
-    roi_status, _ = get_roi_color_status(results['kpis']['roi'])
-    tf.text = f'ROI: {results["kpis"]["roi"]:.0f}% - {roi_status.replace("🟢 ", "").replace("🟡 ", "").replace("🟠 ", "").replace("🔴 ", "")}'
+    tf.text = f'Discount Rate: {params["discount_rate"]:.1f}% (Cost of Capital)'
     
     p = tf.add_paragraph()
-    payback_status, _ = get_payback_color_status(results['kpis']['payback_months'])
-    p.text = f'Payback: {results["kpis"]["payback_months"]:.1f} months - {payback_status.replace("🟢 ", "").replace("🟡 ", "").replace("🟠 ", "").replace("🔴 ", "")}'
+    p.text = f'Analysis Period: {params["analysis_years"]} years with {params["inflation_rate"]:.1f}% inflation'
     
     p = tf.add_paragraph()
-    p.text = f'NPV: {format_currency(results["kpis"]["npv"])}'
+    p.text = 'NPV calculated using discounted cash flows'
     
     p = tf.add_paragraph()
-    p.text = f'Benefit-Cost Ratio: {results["kpis"]["benefit_cost_ratio"]:.1f}:1'
+    p.text = 'IRR assumes reinvestment at hurdle rate'
     
-    # Slide 6: Recommendations
+    p = tf.add_paragraph()
+    p.text = 'Benefits include productivity, retention, and team gains'
+    
+    # Slide 7: Recommendations
     slide = prs.slides.add_slide(bullet_slide_layout)
     shapes = slide.shapes
     
@@ -686,7 +826,12 @@ def main():
             # Industry Benchmarks
             'current_turnover': 18,
             'replacement_cost': 1.5,
-            'team_size': 8
+            'team_size': 8,
+            
+            # Financial Parameters
+            'discount_rate': 8.0,
+            'tax_rate': 25.0,
+            'inflation_rate': 3.0
         }
     
     # Sidebar for inputs
@@ -755,6 +900,32 @@ def main():
             st.session_state.params[field] = st.number_input(
                 label, min_value=0, value=st.session_state.params[field], step=step
             )
+        
+        st.divider()
+        
+        # Financial Parameters
+        st.subheader("🏦 Financial Parameters")
+        st.session_state.params['discount_rate'] = st.number_input(
+            "Discount Rate / Cost of Capital (%)", 
+            min_value=0.0, max_value=20.0, 
+            value=st.session_state.params['discount_rate'], 
+            step=0.5,
+            help="Your organization's weighted average cost of capital (WACC)"
+        )
+        st.session_state.params['tax_rate'] = st.number_input(
+            "Corporate Tax Rate (%)", 
+            min_value=0.0, max_value=50.0, 
+            value=st.session_state.params['tax_rate'], 
+            step=1.0,
+            help="Corporate tax rate for tax shield calculations"
+        )
+        st.session_state.params['inflation_rate'] = st.number_input(
+            "Expected Inflation Rate (%)", 
+            min_value=0.0, max_value=10.0, 
+            value=st.session_state.params['inflation_rate'], 
+            step=0.5,
+            help="Expected annual inflation rate for benefit adjustments"
+        )
     
     # Calculate results
     results = calculate_roi(st.session_state.params)
@@ -800,6 +971,113 @@ def main():
                 f"{bcr:.1f}:1",
                 delta=bcr_status
             )
+        
+        # Additional Financial Metrics
+        st.subheader("📈 Advanced Financial Metrics")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            irr_value = results['kpis']['irr']
+            if irr_value is not None:
+                irr_status = "🟢 Excellent" if irr_value >= 25 else "🟡 Good" if irr_value >= 15 else "🟠 Moderate"
+                st.metric(
+                    "Internal Rate of Return",
+                    f"{irr_value:.1f}%",
+                    delta=irr_status
+                )
+            else:
+                st.metric("Internal Rate of Return", "N/A", delta="🔴 Cannot calculate")
+        
+        with col2:
+            mirr_value = results['kpis']['mirr']
+            if mirr_value is not None:
+                mirr_status = "🟢 Excellent" if mirr_value >= 20 else "🟡 Good" if mirr_value >= 12 else "🟠 Moderate"
+                st.metric(
+                    "Modified IRR",
+                    f"{mirr_value:.1f}%",
+                    delta=mirr_status
+                )
+            else:
+                st.metric("Modified IRR", "N/A", delta="🔴 Cannot calculate")
+        
+        with col3:
+            pi = results['kpis']['profitability_index']
+            pi_status = "🟢 Excellent" if pi >= 1.5 else "🟡 Good" if pi >= 1.2 else "🟠 Moderate" if pi >= 1.0 else "🔴 Poor"
+            st.metric(
+                "Profitability Index",
+                f"{pi:.2f}",
+                delta=pi_status
+            )
+        
+        with col4:
+            discount_rate = st.session_state.params['discount_rate']
+            hurdle_comparison = "🟢 Above hurdle" if irr_value and irr_value > discount_rate else "🔴 Below hurdle"
+            st.metric(
+                "vs. Hurdle Rate",
+                f"{discount_rate:.1f}%",
+                delta=hurdle_comparison
+            )
+        
+        # Methodology Expander
+        with st.expander("📚 Calculation Methodology", expanded=False):
+            st.markdown("""
+            ### Financial Metrics Explained
+            
+            **Return on Investment (ROI)**
+            ```
+            ROI = (Total Benefits - Total Costs) / Total Costs × 100%
+            ```
+            Measures the efficiency of the investment relative to its cost.
+            
+            **Net Present Value (NPV)**
+            ```
+            NPV = Σ(Cash Flow_t / (1 + r)^t) - Initial Investment
+            ```
+            Where r = discount rate, t = time period. Accounts for time value of money.
+            
+            **Internal Rate of Return (IRR)**
+            ```
+            0 = Σ(Cash Flow_t / (1 + IRR)^t)
+            ```
+            The discount rate that makes NPV equal to zero.
+            
+            **Modified Internal Rate of Return (MIRR)**
+            ```
+            MIRR = (Future Value of Positive Flows / Present Value of Negative Flows)^(1/n) - 1
+            ```
+            More realistic than IRR as it assumes reinvestment at the cost of capital.
+            
+            **Benefit-Cost Ratio (BCR)**
+            ```
+            BCR = Present Value of Benefits / Present Value of Costs
+            ```
+            Values > 1.0 indicate positive value creation.
+            
+            **Profitability Index (PI)**
+            ```
+            PI = Present Value of Future Cash Flows / Initial Investment
+            ```
+            Similar to BCR but focuses on cash flows vs. initial investment.
+            
+            **Payback Period**
+            ```
+            Payback = Initial Investment / Annual Cash Flow
+            ```
+            Time required to recover the initial investment.
+            
+            ### Key Assumptions:
+            - **Discount Rate:** {:.1f}% (Your organization's cost of capital)
+            - **Inflation Rate:** {:.1f}% (Applied to future benefits)
+            - **Tax Rate:** {:.1f}% (For tax considerations)
+            - **Analysis Period:** {} years
+            - **Participant Time Cost:** Loaded salary rate (salary × 1.3) to include benefits
+            """.format(
+                st.session_state.params['discount_rate'],
+                st.session_state.params['inflation_rate'], 
+                st.session_state.params['tax_rate'],
+                st.session_state.params['analysis_years']
+            ))
         
         st.divider()
         
@@ -938,6 +1216,79 @@ def main():
             hovermode='x'
         )
         st.plotly_chart(fig_cashflow, use_container_width=True)
+        
+        st.divider()
+        
+        # Discount Rate Sensitivity Analysis
+        st.subheader("📊 Discount Rate Sensitivity Analysis")
+        
+        # Generate sensitivity data
+        discount_rates = [2, 4, 6, 8, 10, 12, 15, 20]
+        sensitivity_data = []
+        
+        for rate in discount_rates:
+            # Temporarily calculate with different discount rate
+            temp_params = st.session_state.params.copy()
+            temp_params['discount_rate'] = rate
+            temp_results = calculate_roi(temp_params)
+            
+            sensitivity_data.append({
+                'Discount Rate (%)': rate,
+                'NPV': temp_results['kpis']['npv'],
+                'ROI (%)': temp_results['kpis']['roi'],
+                'BCR': temp_results['kpis']['benefit_cost_ratio']
+            })
+        
+        df_sensitivity = pd.DataFrame(sensitivity_data)
+        
+        # Create sensitivity chart
+        fig_sensitivity = go.Figure()
+        
+        fig_sensitivity.add_trace(go.Scatter(
+            x=df_sensitivity['Discount Rate (%)'],
+            y=df_sensitivity['NPV'],
+            mode='lines+markers',
+            name='NPV ($)',
+            yaxis='y',
+            line=dict(color='blue', width=3)
+        ))
+        
+        # Add current discount rate line
+        current_rate = st.session_state.params['discount_rate']
+        fig_sensitivity.add_vline(
+            x=current_rate, 
+            line_dash="dash", 
+            line_color="red",
+            annotation_text=f"Current Rate: {current_rate}%"
+        )
+        
+        fig_sensitivity.add_hline(y=0, line_dash="dash", line_color="gray", annotation_text="Break-even NPV")
+        
+        fig_sensitivity.update_layout(
+            title="NPV Sensitivity to Discount Rate Changes",
+            xaxis_title="Discount Rate (%)",
+            yaxis_title="Net Present Value ($)",
+            hovermode='x unified'
+        )
+        
+        st.plotly_chart(fig_sensitivity, use_container_width=True)
+        
+        # Sensitivity table
+        st.markdown("**Sensitivity Analysis Table**")
+        
+        # Highlight current rate row
+        def highlight_current_rate(row):
+            if abs(row['Discount Rate (%)'] - current_rate) < 0.1:
+                return ['background-color: lightblue'] * len(row)
+            return [''] * len(row)
+        
+        # Format the dataframe for display
+        df_display = df_sensitivity.copy()
+        df_display['NPV'] = df_display['NPV'].apply(lambda x: format_currency(x))
+        df_display['ROI (%)'] = df_display['ROI (%)'].apply(lambda x: f"{x:.1f}%")
+        df_display['BCR'] = df_display['BCR'].apply(lambda x: f"{x:.2f}")
+        
+        st.dataframe(df_display.style.apply(highlight_current_rate, axis=1), use_container_width=True)
     
     with tab4:
         st.subheader("🤖 AI-Powered Insights")
