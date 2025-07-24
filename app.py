@@ -7,6 +7,22 @@ import plotly.express as px
 import plotly.graph_objects as go
 from groq import Groq
 import os
+import io
+import base64
+
+# Additional imports for PDF and PowerPoint generation
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib import colors
+from reportlab.graphics.shapes import Drawing
+from reportlab.graphics.charts.piecharts import Pie
+from reportlab.graphics.charts.barcharts import VerticalBarChart
+from pptx import Presentation
+from pptx.util import Inches, Pt
+from pptx.enum.text import PP_ALIGN
+from pptx.dml.color import RGBColor
 
 # Configure Streamlit page
 st.set_page_config(
@@ -270,6 +286,365 @@ def get_ai_insights(results, params):
                 return f"AI insights unavailable: {str(e)}"
     
     return "AI insights unavailable: All models are currently unavailable"
+
+def generate_pdf_report(params, results):
+    """Generate PDF report with ROI analysis"""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    styles = getSampleStyleSheet()
+    story = []
+    
+    # Custom styles
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        spaceAfter=30,
+        textColor=colors.darkblue,
+        alignment=1  # Center alignment
+    )
+    
+    heading_style = ParagraphStyle(
+        'CustomHeading',
+        parent=styles['Heading2'],
+        fontSize=16,
+        spaceAfter=12,
+        textColor=colors.darkblue
+    )
+    
+    # Title page
+    story.append(Paragraph("Leadership Programme ROI Analysis", title_style))
+    story.append(Spacer(1, 0.5*inch))
+    story.append(Paragraph(f"Generated on: {datetime.now().strftime('%B %d, %Y')}", styles['Normal']))
+    story.append(Spacer(1, 1*inch))
+    
+    # Executive Summary
+    story.append(Paragraph("Executive Summary", heading_style))
+    
+    roi_status, _ = get_roi_color_status(results['kpis']['roi'])
+    payback_status, _ = get_payback_color_status(results['kpis']['payback_months'])
+    
+    recommendation = (
+        "STRONG BUSINESS CASE - Proceed with implementation" if results['kpis']['roi'] >= 200 else
+        "MODERATE BUSINESS CASE - Consider optimization" if results['kpis']['roi'] >= 100 else
+        "WEAK BUSINESS CASE - Review assumptions and design"
+    )
+    
+    summary_text = f"""
+    <b>Investment:</b> {format_currency(results['costs']['total'])}<br/>
+    <b>Annual Benefits:</b> {format_currency(results['benefits']['total_annual'])}<br/>
+    <b>Net Benefit:</b> {format_currency(results['kpis']['net_benefit'])}<br/>
+    <b>ROI:</b> {results['kpis']['roi']:.0f}% ({roi_status.replace('🟢 ', '').replace('🟡 ', '').replace('🟠 ', '').replace('🔴 ', '')})<br/>
+    <b>Payback Period:</b> {results['kpis']['payback_months']:.1f} months<br/>
+    <b>Recommendation:</b> {recommendation}
+    """
+    
+    story.append(Paragraph(summary_text, styles['Normal']))
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Program Details
+    story.append(Paragraph("Program Details", heading_style))
+    
+    program_data = [
+        ['Metric', 'Value'],
+        ['Participants', str(params['participants'])],
+        ['Duration', f"{params['program_duration']} months"],
+        ['Average Salary', format_currency(params['avg_salary'])],
+        ['Time Commitment', f"{params['time_commitment']} hours/month"],
+        ['Analysis Period', f"{params['analysis_years']} years"]
+    ]
+    
+    program_table = Table(program_data)
+    program_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 14),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    
+    story.append(program_table)
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Cost Breakdown
+    story.append(Paragraph("Cost Breakdown", heading_style))
+    
+    cost_data = [
+        ['Cost Category', 'Amount', 'Percentage'],
+        ['Facilitator Costs', format_currency(results['costs']['facilitator']), 
+         f"{(results['costs']['facilitator']/results['costs']['total']*100):.1f}%"],
+        ['Materials & Content', format_currency(results['costs']['materials']), 
+         f"{(results['costs']['materials']/results['costs']['total']*100):.1f}%"],
+        ['Venue & Catering', format_currency(results['costs']['venue']), 
+         f"{(results['costs']['venue']/results['costs']['total']*100):.1f}%"],
+        ['Travel & Accommodation', format_currency(results['costs']['travel']), 
+         f"{(results['costs']['travel']/results['costs']['total']*100):.1f}%"],
+        ['Technology Platform', format_currency(results['costs']['technology']), 
+         f"{(results['costs']['technology']/results['costs']['total']*100):.1f}%"],
+        ['Assessment & Evaluation', format_currency(results['costs']['assessment']), 
+         f"{(results['costs']['assessment']/results['costs']['total']*100):.1f}%"],
+        ['Participant Time', format_currency(results['costs']['participant_time']), 
+         f"{(results['costs']['participant_time']/results['costs']['total']*100):.1f}%"],
+        ['TOTAL', format_currency(results['costs']['total']), '100.0%']
+    ]
+    
+    cost_table = Table(cost_data)
+    cost_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -2), colors.beige),
+        ('BACKGROUND', (0, -1), (-1, -1), colors.lightgrey),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    
+    story.append(cost_table)
+    story.append(PageBreak())
+    
+    # Benefits Analysis
+    story.append(Paragraph("Benefits Analysis", heading_style))
+    
+    benefit_data = [
+        ['Benefit Category', 'Annual Amount', 'Total Value'],
+        ['Productivity Improvement', format_currency(results['benefits']['productivity']), 
+         format_currency(results['benefits']['productivity'] * params['analysis_years'])],
+        ['Retention Savings', format_currency(results['benefits']['retention']), 
+         format_currency(results['benefits']['retention'] * params['analysis_years'])],
+        ['Team Performance', format_currency(results['benefits']['team_performance']), 
+         format_currency(results['benefits']['team_performance'] * params['analysis_years'])],
+        ['Promotion Acceleration', format_currency(results['benefits']['promotion']), 
+         format_currency(results['benefits']['promotion'] * params['analysis_years'])],
+        ['Decision Quality', format_currency(results['benefits']['decision_quality']), 
+         format_currency(results['benefits']['decision_quality'] * params['analysis_years'])],
+        ['TOTAL', format_currency(results['benefits']['total_annual']), 
+         format_currency(results['benefits']['total_multi_year'])]
+    ]
+    
+    benefit_table = Table(benefit_data)
+    benefit_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -2), colors.beige),
+        ('BACKGROUND', (0, -1), (-1, -1), colors.lightgrey),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    
+    story.append(benefit_table)
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Key Performance Indicators
+    story.append(Paragraph("Key Performance Indicators", heading_style))
+    
+    kpi_data = [
+        ['KPI', 'Value', 'Status'],
+        ['Return on Investment', f"{results['kpis']['roi']:.0f}%", roi_status.replace('🟢 ', '').replace('🟡 ', '').replace('🟠 ', '').replace('🔴 ', '')],
+        ['Payback Period', f"{results['kpis']['payback_months']:.1f} months", payback_status.replace('🟢 ', '').replace('🟡 ', '').replace('🟠 ', '').replace('🔴 ', '')],
+        ['Net Present Value', format_currency(results['kpis']['npv']), 'Positive' if results['kpis']['npv'] > 0 else 'Negative'],
+        ['Benefit-Cost Ratio', f"{results['kpis']['benefit_cost_ratio']:.1f}:1", 'Strong' if results['kpis']['benefit_cost_ratio'] >= 3 else 'Moderate' if results['kpis']['benefit_cost_ratio'] >= 2 else 'Weak']
+    ]
+    
+    kpi_table = Table(kpi_data)
+    kpi_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    
+    story.append(kpi_table)
+    story.append(Spacer(1, 0.3*inch))
+    
+    # Recommendations
+    story.append(Paragraph("Recommendations", heading_style))
+    
+    recommendations = [
+        "• Implement Kirkpatrick Level 3 & 4 evaluation to track behavior change and business results",
+        "• Benefits typically materialize 3-6 months post-program completion",
+        "• Include manager coaching and 90-day action plans for lasting impact",
+        "• World-class leadership programs typically achieve 200-400% ROI",
+        "• Start with pilot cohort to validate assumptions before full rollout"
+    ]
+    
+    for rec in recommendations:
+        story.append(Paragraph(rec, styles['Normal']))
+    
+    # Build PDF
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+def generate_powerpoint_report(params, results):
+    """Generate PowerPoint presentation with ROI analysis"""
+    prs = Presentation()
+    
+    # Slide 1: Title Slide
+    title_slide_layout = prs.slide_layouts[0]
+    slide = prs.slides.add_slide(title_slide_layout)
+    title = slide.shapes.title
+    subtitle = slide.placeholders[1]
+    
+    title.text = "Leadership Programme ROI Analysis"
+    subtitle.text = f"Business Case & Financial Impact\nGenerated on {datetime.now().strftime('%B %d, %Y')}"
+    
+    # Slide 2: Executive Summary
+    bullet_slide_layout = prs.slide_layouts[1]
+    slide = prs.slides.add_slide(bullet_slide_layout)
+    shapes = slide.shapes
+    
+    title_shape = shapes.title
+    body_shape = shapes.placeholders[1]
+    
+    title_shape.text = 'Executive Summary'
+    
+    tf = body_shape.text_frame
+    tf.text = f'Investment: {format_currency(results["costs"]["total"])}'
+    
+    p = tf.add_paragraph()
+    p.text = f'Annual Benefits: {format_currency(results["benefits"]["total_annual"])}'
+    
+    p = tf.add_paragraph()
+    p.text = f'ROI: {results["kpis"]["roi"]:.0f}%'
+    
+    p = tf.add_paragraph()
+    p.text = f'Payback Period: {results["kpis"]["payback_months"]:.1f} months'
+    
+    p = tf.add_paragraph()
+    recommendation = (
+        "STRONG BUSINESS CASE - Proceed with implementation" if results['kpis']['roi'] >= 200 else
+        "MODERATE BUSINESS CASE - Consider optimization" if results['kpis']['roi'] >= 100 else
+        "WEAK BUSINESS CASE - Review assumptions and design"
+    )
+    p.text = f'Recommendation: {recommendation}'
+    
+    # Slide 3: Program Details
+    slide = prs.slides.add_slide(bullet_slide_layout)
+    shapes = slide.shapes
+    
+    title_shape = shapes.title
+    body_shape = shapes.placeholders[1]
+    
+    title_shape.text = 'Program Details'
+    
+    tf = body_shape.text_frame
+    tf.text = f'Participants: {params["participants"]}'
+    
+    p = tf.add_paragraph()
+    p.text = f'Duration: {params["program_duration"]} months'
+    
+    p = tf.add_paragraph()
+    p.text = f'Average Salary: {format_currency(params["avg_salary"])}'
+    
+    p = tf.add_paragraph()
+    p.text = f'Time Commitment: {params["time_commitment"]} hours/month'
+    
+    p = tf.add_paragraph()
+    p.text = f'Analysis Period: {params["analysis_years"]} years'
+    
+    # Slide 4: Financial Summary
+    slide = prs.slides.add_slide(prs.slide_layouts[5])  # Blank layout
+    shapes = slide.shapes
+    
+    # Add title
+    title_shape = shapes.add_textbox(Inches(0.5), Inches(0.5), Inches(9), Inches(1))
+    title_frame = title_shape.text_frame
+    title_frame.text = "Financial Summary"
+    title_frame.paragraphs[0].font.size = Pt(32)
+    title_frame.paragraphs[0].font.bold = True
+    
+    # Add table
+    rows = 5
+    cols = 2
+    left = Inches(2)
+    top = Inches(2)
+    width = Inches(6)
+    height = Inches(3)
+    
+    table = shapes.add_table(rows, cols, left, top, width, height).table
+    
+    # Table headers
+    table.cell(0, 0).text = 'Metric'
+    table.cell(0, 1).text = 'Value'
+    
+    # Table data
+    table.cell(1, 0).text = 'Total Investment'
+    table.cell(1, 1).text = format_currency(results['costs']['total'])
+    
+    table.cell(2, 0).text = 'Annual Benefits'
+    table.cell(2, 1).text = format_currency(results['benefits']['total_annual'])
+    
+    table.cell(3, 0).text = 'Net Benefit'
+    table.cell(3, 1).text = format_currency(results['kpis']['net_benefit'])
+    
+    table.cell(4, 0).text = 'Benefit-Cost Ratio'
+    table.cell(4, 1).text = f"{results['kpis']['benefit_cost_ratio']:.1f}:1"
+    
+    # Slide 5: Key Performance Indicators
+    slide = prs.slides.add_slide(bullet_slide_layout)
+    shapes = slide.shapes
+    
+    title_shape = shapes.title
+    body_shape = shapes.placeholders[1]
+    
+    title_shape.text = 'Key Performance Indicators'
+    
+    tf = body_shape.text_frame
+    roi_status, _ = get_roi_color_status(results['kpis']['roi'])
+    tf.text = f'ROI: {results["kpis"]["roi"]:.0f}% - {roi_status.replace("🟢 ", "").replace("🟡 ", "").replace("🟠 ", "").replace("🔴 ", "")}'
+    
+    p = tf.add_paragraph()
+    payback_status, _ = get_payback_color_status(results['kpis']['payback_months'])
+    p.text = f'Payback: {results["kpis"]["payback_months"]:.1f} months - {payback_status.replace("🟢 ", "").replace("🟡 ", "").replace("🟠 ", "").replace("🔴 ", "")}'
+    
+    p = tf.add_paragraph()
+    p.text = f'NPV: {format_currency(results["kpis"]["npv"])}'
+    
+    p = tf.add_paragraph()
+    p.text = f'Benefit-Cost Ratio: {results["kpis"]["benefit_cost_ratio"]:.1f}:1'
+    
+    # Slide 6: Recommendations
+    slide = prs.slides.add_slide(bullet_slide_layout)
+    shapes = slide.shapes
+    
+    title_shape = shapes.title
+    body_shape = shapes.placeholders[1]
+    
+    title_shape.text = 'Recommendations'
+    
+    tf = body_shape.text_frame
+    tf.text = 'Implement Kirkpatrick Level 3 & 4 evaluation'
+    
+    recommendations = [
+        'Benefits typically materialize 3-6 months post-program',
+        'Include manager coaching and 90-day action plans',
+        'World-class programs achieve 200-400% ROI',
+        'Start with pilot cohort to validate assumptions'
+    ]
+    
+    for rec in recommendations:
+        p = tf.add_paragraph()
+        p.text = rec
+    
+    # Save to buffer
+    buffer = io.BytesIO()
+    prs.save(buffer)
+    buffer.seek(0)
+    return buffer
 
 def main():
     # Header
@@ -591,7 +966,7 @@ def main():
     st.divider()
     st.subheader("📄 Export Business Case")
     
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
         if st.button("📊 Export Data (JSON)", type="secondary"):
@@ -630,6 +1005,34 @@ def main():
             )
     
     with col3:
+        if st.button("📋 Export PDF Report", type="secondary"):
+            try:
+                pdf_buffer = generate_pdf_report(st.session_state.params, results)
+                st.download_button(
+                    label="Download PDF",
+                    data=pdf_buffer,
+                    file_name=f"leadership_roi_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                    mime="application/pdf"
+                )
+            except Exception as e:
+                st.error(f"Error generating PDF: {str(e)}")
+                st.info("Install reportlab: pip install reportlab")
+    
+    with col4:
+        if st.button("📊 Export PowerPoint", type="secondary"):
+            try:
+                ppt_buffer = generate_powerpoint_report(st.session_state.params, results)
+                st.download_button(
+                    label="Download PPTX",
+                    data=ppt_buffer,
+                    file_name=f"leadership_roi_presentation_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pptx",
+                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                )
+            except Exception as e:
+                st.error(f"Error generating PowerPoint: {str(e)}")
+                st.info("Install python-pptx: pip install python-pptx")
+    
+    with col5:
         recommendation = (
             "STRONG BUSINESS CASE - Proceed with implementation" if results['kpis']['roi'] >= 200 else
             "MODERATE BUSINESS CASE - Consider optimization" if results['kpis']['roi'] >= 100 else
