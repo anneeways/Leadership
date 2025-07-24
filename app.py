@@ -74,7 +74,49 @@ def init_groq():
 
 groq_client = init_groq()
 
-# Industry Templates
+# Cost of Capital Templates
+COST_OF_CAPITAL_TEMPLATES = {
+    'startup': {
+        'name': "Startup / High-Growth",
+        'rate': 15.0,
+        'description': "High risk, high growth expectations"
+    },
+    'public_large': {
+        'name': "Large Public Corporation",
+        'rate': 8.0,
+        'description': "Established, diversified operations"
+    },
+    'public_small': {
+        'name': "Small/Mid-Cap Public",
+        'rate': 10.0,
+        'description': "Higher risk than large cap"
+    },
+    'private_mature': {
+        'name': "Mature Private Company",
+        'rate': 12.0,
+        'description': "Established but less liquid"
+    },
+    'nonprofit': {
+        'name': "Non-Profit Organization",
+        'rate': 6.0,
+        'description': "Lower risk expectations"
+    },
+    'government': {
+        'name': "Government / Public Sector",
+        'rate': 4.0,
+        'description': "Risk-free rate plus small premium"
+    },
+    'private_equity': {
+        'name': "Private Equity Backed",
+        'rate': 18.0,
+        'description': "High return expectations"
+    },
+    'family_office': {
+        'name': "Family Office / UHNW",
+        'rate': 7.0,
+        'description': "Conservative wealth preservation"
+    }
+}
 INDUSTRY_TEMPLATES = {
     'technology': {
         'name': "Technology",
@@ -538,10 +580,20 @@ def generate_pdf_report(params, results):
     
     methodology_text = f"""
     <b>Key Financial Assumptions:</b><br/>
-    • Discount Rate (Cost of Capital): {params['discount_rate']:.1f}%<br/>
+    • Cost of Capital: {params['discount_rate']:.1f}% (Organization's required return)<br/>
     • Expected Inflation Rate: {params['inflation_rate']:.1f}%<br/>
     • Corporate Tax Rate: {params['tax_rate']:.1f}%<br/>
     • Analysis Period: {params['analysis_years']} years<br/><br/>
+    
+    <b>Cost of Capital Analysis:</b><br/>
+    The {params['discount_rate']:.1f}% cost of capital represents your organization's minimum 
+    acceptable return on investment. This rate should reflect your weighted average cost of 
+    capital (WACC), considering both debt and equity costs plus appropriate risk premiums.<br/><br/>
+    
+    <b>Investment Performance vs. Hurdle:</b><br/>
+    • Required Return: {params['discount_rate']:.1f}%<br/>
+    • Project IRR: {results['kpis']['irr']:.1f}%<br/>
+    • Spread: {(results['kpis']['irr'] - params['discount_rate']):+.1f} percentage points<br/><br/>
     
     <b>Calculation Methods:</b><br/>
     • <b>ROI:</b> (Total Benefits - Total Costs) / Total Costs × 100%<br/>
@@ -743,10 +795,14 @@ def generate_powerpoint_report(params, results):
     title_shape.text = 'Financial Methodology'
     
     tf = body_shape.text_frame
-    tf.text = f'Discount Rate: {params["discount_rate"]:.1f}% (Cost of Capital)'
+    tf.text = f'Cost of Capital: {params["discount_rate"]:.1f}% (Organization hurdle rate)'
     
     p = tf.add_paragraph()
     p.text = f'Analysis Period: {params["analysis_years"]} years with {params["inflation_rate"]:.1f}% inflation'
+    
+    p = tf.add_paragraph()
+    irr_vs_hurdle = results['kpis']['irr'] - params['discount_rate'] if results['kpis']['irr'] else 0
+    p.text = f'IRR vs. Cost of Capital: {irr_vs_hurdle:+.1f} percentage points'
     
     p = tf.add_paragraph()
     p.text = 'NPV calculated using discounted cash flows'
@@ -911,15 +967,71 @@ def main():
         
         st.divider()
         
-        # Financial Parameters
-        st.subheader("🏦 Financial Parameters")
+        # Cost of Capital Selection
+        st.subheader("💰 Cost of Capital")
+        
+        # Cost of Capital Templates
+        cost_of_capital_options = ['Custom'] + [template['name'] for template in COST_OF_CAPITAL_TEMPLATES.values()]
+        selected_cost_template = st.selectbox(
+            "Organization Type", 
+            cost_of_capital_options,
+            help="Select your organization type for appropriate cost of capital"
+        )
+        
+        if selected_cost_template != 'Custom':
+            # Find the template key
+            template_key = None
+            for key, template in COST_OF_CAPITAL_TEMPLATES.items():
+                if template['name'] == selected_cost_template:
+                    template_key = key
+                    break
+            
+            if template_key:
+                template = COST_OF_CAPITAL_TEMPLATES[template_key]
+                st.info(f"**{template['name']}**: {template['description']}")
+                
+                if st.button("Apply Cost of Capital"):
+                    st.session_state.params['discount_rate'] = template['rate']
+                    st.success(f"Applied {template['rate']:.1f}% cost of capital!")
+                    st.rerun()
+        
+        # Manual cost of capital input
         st.session_state.params['discount_rate'] = st.number_input(
-            "Discount Rate / Cost of Capital (%)", 
-            min_value=0.0, max_value=20.0, 
+            "Cost of Capital / Discount Rate (%)", 
+            min_value=0.0, max_value=25.0, 
             value=st.session_state.params['discount_rate'], 
             step=0.5,
             help="Your organization's weighted average cost of capital (WACC)"
         )
+        
+        # Cost of capital guidance
+        with st.expander("💡 Cost of Capital Guidance"):
+            st.markdown("""
+            **What is Cost of Capital?**
+            The minimum return your organization expects from investments, representing:
+            - **Cost of Debt**: Interest rates on borrowed money
+            - **Cost of Equity**: Expected returns for shareholders
+            - **Risk Premium**: Additional return for business risk
+            
+            **Typical Ranges by Organization:**
+            - **Government/Public Sector**: 3-5%
+            - **Large Public Companies**: 6-10%
+            - **Small/Medium Private**: 10-15%
+            - **Startups/High Growth**: 15-20%
+            - **Private Equity**: 18-25%
+            
+            **Consider Your:**
+            - Industry risk level
+            - Company size and maturity
+            - Financial leverage
+            - Market conditions
+            - Investment time horizon
+            """)
+        
+        st.divider()
+        
+        # Financial Parameters
+        st.subheader("🏦 Other Financial Parameters")
         st.session_state.params['tax_rate'] = st.number_input(
             "Corporate Tax Rate (%)", 
             min_value=0.0, max_value=50.0, 
@@ -942,6 +1054,21 @@ def main():
     tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "⚙️ Assumptions", "📈 Analysis", "🤖 AI Insights"])
     
     with tab1:
+        # Cost of Capital Indicator
+        current_rate = st.session_state.params['discount_rate']
+        
+        # Find if current rate matches any template
+        matching_template = None
+        for key, template in COST_OF_CAPITAL_TEMPLATES.items():
+            if abs(template['rate'] - current_rate) < 0.1:
+                matching_template = template
+                break
+        
+        if matching_template:
+            st.info(f"💰 **Cost of Capital**: {current_rate:.1f}% ({matching_template['name']}) - {matching_template['description']}")
+        else:
+            st.info(f"💰 **Cost of Capital**: {current_rate:.1f}% (Custom rate for your organization)")
+        
         # Key Metrics Dashboard
         st.subheader("🎯 Key Performance Indicators")
         
@@ -1020,12 +1147,22 @@ def main():
         
         with col4:
             discount_rate = st.session_state.params['discount_rate']
-            hurdle_comparison = "🟢 Above hurdle" if irr_value and irr_value > discount_rate else "🔴 Below hurdle"
-            st.metric(
-                "vs. Hurdle Rate",
-                f"{discount_rate:.1f}%",
-                delta=hurdle_comparison
-            )
+            irr_value = results['kpis']['irr']
+            
+            if irr_value is not None:
+                spread = irr_value - discount_rate
+                hurdle_comparison = "🟢 Above hurdle" if spread > 0 else "🔴 Below hurdle"
+                st.metric(
+                    "vs. Cost of Capital",
+                    f"+{spread:.1f}%" if spread > 0 else f"{spread:.1f}%",
+                    delta=f"Hurdle: {discount_rate:.1f}%"
+                )
+            else:
+                st.metric(
+                    "Cost of Capital",
+                    f"{discount_rate:.1f}%",
+                    delta="Minimum required return"
+                )
         
         # Methodology Expander
         with st.expander("📚 Calculation Methodology", expanded=False):
@@ -1075,16 +1212,24 @@ def main():
             Time required to recover the initial investment.
             
             ### Key Assumptions:
-            - **Discount Rate:** {:.1f}% (Your organization's cost of capital)
+            - **Cost of Capital:** {:.1f}% (Your organization's required return)
             - **Inflation Rate:** {:.1f}% (Applied to future benefits)
             - **Tax Rate:** {:.1f}% (For tax considerations)
             - **Analysis Period:** {} years
             - **Participant Time Cost:** Loaded salary rate (salary × 1.3) to include benefits
+            
+            ### Cost of Capital Context:
+            Current rate of {:.1f}% represents your organization's minimum acceptable return.
+            The IRR of {:.1f}% {} this hurdle rate by {:.1f} percentage points.
             """.format(
                 st.session_state.params['discount_rate'],
                 st.session_state.params['inflation_rate'], 
                 st.session_state.params['tax_rate'],
-                st.session_state.params['analysis_years']
+                st.session_state.params['analysis_years'],
+                st.session_state.params['discount_rate'],
+                results['kpis']['irr'] if results['kpis']['irr'] else 0,
+                "exceeds" if results['kpis']['irr'] and results['kpis']['irr'] > st.session_state.params['discount_rate'] else "falls short of",
+                abs((results['kpis']['irr'] or 0) - st.session_state.params['discount_rate'])
             ))
         
         st.divider()
