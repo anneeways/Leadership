@@ -1,12 +1,4 @@
-# Initialize chat history
-        if 'chat_history' not in st.session_state:
-            st.session_state.chat_history = []
-        
-        # Add welcome message only once per session
-        if 'chatbot_welcomed' not in st.session_state:
-            st.session_state.chatbot_welcomed = True
-            welcome_msg = f"""
-Welcome! I'm your AI consultant for leadership program ROI analysis. I can see you're analyzing a program with {params['participants']} participants and a {import streamlit as st
+import streamlit as st
 import pandas as pd
 import numpy as np
 import json
@@ -1630,20 +1622,23 @@ def main():
         # Initialize chat history
         if 'chat_history' not in st.session_state:
             st.session_state.chat_history = []
-            # Add welcome message
+        
+        # Add welcome message only once per session
+        if 'chatbot_welcomed' not in st.session_state:
+            st.session_state.chatbot_welcomed = True
             welcome_msg = f"""
-            Welcome! I'm your AI consultant for leadership program ROI analysis. I can see you're analyzing a program with {params['participants']} participants and a {format_currency(results['costs']['total'])} investment.
+Welcome! I'm your AI consultant for leadership program ROI analysis. I can see you're analyzing a program with {params['participants']} participants and a {format_currency(results['costs']['total'])} investment.
 
-            Your current ROI is {results['kpis']['roi']:.1f}% with a {results['kpis']['payback_months']:.1f}-month payback period. 
+Your current ROI is {results['kpis']['roi']:.1f}% with a {results['kpis']['payback_months']:.1f}-month payback period. 
 
-            I can help you:
-            • 📊 Interpret your financial results
-            • 💡 Suggest improvements to your business case  
-            • ⚖️ Compare against industry benchmarks
-            • 🎯 Optimize costs and assumptions
-            • 📋 Prepare for stakeholder presentations
+I can help you:
+• 📊 Interpret your financial results
+• 💡 Suggest improvements to your business case  
+• ⚖️ Compare against industry benchmarks
+• 🎯 Optimize costs and assumptions
+• 📋 Prepare for stakeholder presentations
 
-            What would you like to explore first?
+What would you like to explore first?
             """
             st.session_state.chat_history.append(("assistant", welcome_msg))
         
