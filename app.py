@@ -1627,7 +1627,7 @@ def main():
         if 'chatbot_welcomed' not in st.session_state:
             st.session_state.chatbot_welcomed = True
             welcome_msg = f"""
-Welcome! I'm your AI consultant for leadership program ROI analysis. I can see you're analyzing a program with {params['participants']} participants and a {format_currency(results['costs']['total'])} investment.
+Welcome! I'm your AI consultant for leadership program ROI analysis. I can see you're analyzing a program with {st.session_state.params['participants']} participants and a {format_currency(results['costs']['total'])} investment.
 
 Your current ROI is {results['kpis']['roi']:.1f}% with a {results['kpis']['payback_months']:.1f}-month payback period. 
 
@@ -1743,10 +1743,10 @@ What would you like to explore first?
             with col1:
                 st.markdown(f"""
                 **Program Setup:**
-                - {params['participants']} participants
-                - {params['program_duration']} month duration
-                - {format_currency(params['avg_salary'])} avg salary
-                - {params['discount_rate']:.1f}% cost of capital
+                - {st.session_state.params['participants']} participants
+                - {st.session_state.params['program_duration']} month duration
+                - {format_currency(st.session_state.params['avg_salary'])} avg salary
+                - {st.session_state.params['discount_rate']:.1f}% cost of capital
                 """)
             
             with col2:
