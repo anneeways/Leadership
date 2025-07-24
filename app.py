@@ -1,4 +1,12 @@
-import streamlit as st
+# Initialize chat history
+        if 'chat_history' not in st.session_state:
+            st.session_state.chat_history = []
+        
+        # Add welcome message only once per session
+        if 'chatbot_welcomed' not in st.session_state:
+            st.session_state.chatbot_welcomed = True
+            welcome_msg = f"""
+Welcome! I'm your AI consultant for leadership program ROI analysis. I can see you're analyzing a program with {params['participants']} participants and a {import streamlit as st
 import pandas as pd
 import numpy as np
 import json
@@ -411,6 +419,87 @@ def get_ai_insights(results, params):
                 return f"AI insights unavailable: {str(e)}"
     
     return "AI insights unavailable: All models are currently unavailable"
+
+def get_chatbot_response(user_question, params, results):
+    """Get chatbot response using Groq with context about the ROI calculation"""
+    if not groq_client:
+        return "Chatbot unavailable (Groq API key not configured). Please add your GROQ_API_KEY to use the AI assistant."
+    
+    # Build comprehensive context
+    context = f"""
+    You are an expert financial analyst and leadership development consultant helping users understand their ROI calculation for a leadership program. 
+
+    CURRENT PROGRAM SETUP:
+    - Participants: {params['participants']}
+    - Program Duration: {params['program_duration']} months
+    - Average Salary: {format_currency(params['avg_salary'])}
+    - Time Commitment: {params['time_commitment']} hours/month
+    - Analysis Period: {params['analysis_years']} years
+    - Cost of Capital: {params['discount_rate']:.1f}%
+    - Expected Inflation: {params['inflation_rate']:.1f}%
+
+    COST BREAKDOWN:
+    - Total Investment: {format_currency(results['costs']['total'])}
+    - Facilitator Costs: {format_currency(results['costs']['facilitator'])}
+    - Materials: {format_currency(results['costs']['materials'])}
+    - Venue: {format_currency(results['costs']['venue'])}
+    - Travel: {format_currency(results['costs']['travel'])}
+    - Technology: {format_currency(results['costs']['technology'])}
+    - Assessment: {format_currency(results['costs']['assessment'])}
+    - Participant Time: {format_currency(results['costs']['participant_time'])}
+
+    BENEFIT ASSUMPTIONS:
+    - Productivity Gain: {params['productivity_gain']:.1f}%
+    - Retention Improvement: {params['retention_improvement']:.1f}%
+    - Team Performance Gain: {params['team_performance_gain']:.1f}%
+    - Decision Quality Gain: {params['decision_quality_gain']:.1f}%
+
+    CURRENT RESULTS:
+    - ROI: {results['kpis']['roi']:.1f}%
+    - Simple Payback: {results['kpis']['payback_months']:.1f} months
+    - Discounted Payback: {results['kpis']['discounted_payback_months']:.1f} months (if not inf)
+    - NPV: {format_currency(results['kpis']['npv'])}
+    - IRR: {results['kpis']['irr']:.1f}% (if not None)
+    - MIRR: {results['kpis']['mirr']:.1f}% (if not None)
+    - Benefit-Cost Ratio: {results['kpis']['benefit_cost_ratio']:.1f}:1
+    - Annual Benefits: {format_currency(results['benefits']['total_annual'])}
+
+    INSTRUCTIONS:
+    - Provide helpful, actionable advice
+    - Explain financial concepts in simple terms
+    - Suggest specific improvements when asked
+    - Use the actual numbers from their calculation
+    - Be encouraging but realistic
+    - If asked about specific parameters, reference their current settings
+    - Help them understand what drives their results
+    - Suggest industry benchmarks when relevant
+    - Keep responses concise but informative (2-3 paragraphs max)
+
+    User Question: {user_question}
+    """
+    
+    models_to_try = [
+        "llama3-70b-8192",
+        "llama3-8b-8192", 
+        "gemma-7b-it"
+    ]
+    
+    for model in models_to_try:
+        try:
+            response = groq_client.chat.completions.create(
+                messages=[{"role": "user", "content": context}],
+                model=model,
+                max_tokens=800,
+                temperature=0.7
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            if "model_decommissioned" in str(e) or "not found" in str(e):
+                continue
+            else:
+                return f"Chatbot error: {str(e)}"
+    
+    return "Chatbot temporarily unavailable. All AI models are currently down."
 
 def generate_pdf_report(params, results):
     """Generate PDF report with ROI analysis"""
@@ -1075,7 +1164,7 @@ def main():
     results = calculate_roi(st.session_state.params)
     
     # Main content tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["📊 Dashboard", "⚙️ Assumptions", "📈 Analysis", "🤖 AI Insights"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Dashboard", "⚙️ Assumptions", "📈 Analysis", "🤖 AI Insights", "💬 AI Assistant"])
     
     with tab1:
         # Cost of Capital Indicator
@@ -1094,7 +1183,18 @@ def main():
             st.info(f"💰 **Cost of Capital**: {current_rate:.1f}% (Custom rate for your organization)")
         
         # Key Metrics Dashboard
-        st.subheader("🎯 Key Performance Indicators")
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.subheader("🎯 Key Performance Indicators")
+        with col2:
+            if st.button("💬 Ask AI about KPIs", key="help_kpis"):
+                question = "Can you help me understand what these KPI results mean for my business case?"
+                if 'chat_history' not in st.session_state:
+                    st.session_state.chat_history = []
+                st.session_state.chat_history.append(("user", question))
+                response = get_chatbot_response(question, st.session_state.params, results)
+                st.session_state.chat_history.append(("assistant", response))
+                st.success("💬 Question added to AI Assistant! Check the 'AI Assistant' tab for the response.")
         
         col1, col2, col3, col4 = st.columns(4)
         
@@ -1265,7 +1365,18 @@ def main():
         col1, col2 = st.columns(2)
         
         with col1:
-            st.subheader("💰 Cost Breakdown")
+            col1a, col1b = st.columns([3, 1])
+            with col1a:
+                st.subheader("💰 Cost Breakdown")
+            with col1b:
+                if st.button("💬 Optimize Costs", key="help_costs", help="Ask AI how to optimize costs"):
+                    question = "Looking at my cost breakdown, how can I optimize my investment while maintaining program quality?"
+                    if 'chat_history' not in st.session_state:
+                        st.session_state.chat_history = []
+                    st.session_state.chat_history.append(("user", question))
+                    response = get_chatbot_response(question, st.session_state.params, results)
+                    st.session_state.chat_history.append(("assistant", response))
+                    st.success("💬 Question sent to AI Assistant!")
             cost_data = {
                 'Category': ['Facilitator', 'Materials', 'Venue', 'Travel', 'Technology', 'Assessment', 'Participant Time'],
                 'Amount': [
@@ -1287,7 +1398,18 @@ def main():
             st.plotly_chart(fig_costs, use_container_width=True)
         
         with col2:
-            st.subheader("📈 Benefit Breakdown")
+            col2a, col2b = st.columns([3, 1])
+            with col2a:
+                st.subheader("📈 Benefit Breakdown")
+            with col2b:
+                if st.button("💬 Validate Benefits", key="help_benefits", help="Ask AI about benefit assumptions"):
+                    question = "Are my benefit assumptions realistic? How can I strengthen the business case for these expected returns?"
+                    if 'chat_history' not in st.session_state:
+                        st.session_state.chat_history = []
+                    st.session_state.chat_history.append(("user", question))
+                    response = get_chatbot_response(question, st.session_state.params, results)
+                    st.session_state.chat_history.append(("assistant", response))
+                    st.success("💬 Question sent to AI Assistant!")
             benefit_data = {
                 'Category': ['Productivity', 'Retention', 'Team Performance', 'Promotions', 'Decision Quality'],
                 'Annual Amount': [
@@ -1501,6 +1623,155 @@ def main():
         
         for rec in recommendations:
             st.markdown(f"✓ {rec}")
+    
+    with tab5:
+        st.subheader("💬 AI Assistant - Your Personal ROI Consultant")
+        
+        # Initialize chat history
+        if 'chat_history' not in st.session_state:
+            st.session_state.chat_history = []
+            # Add welcome message
+            welcome_msg = f"""
+            Welcome! I'm your AI consultant for leadership program ROI analysis. I can see you're analyzing a program with {params['participants']} participants and a {format_currency(results['costs']['total'])} investment.
+
+            Your current ROI is {results['kpis']['roi']:.1f}% with a {results['kpis']['payback_months']:.1f}-month payback period. 
+
+            I can help you:
+            • 📊 Interpret your financial results
+            • 💡 Suggest improvements to your business case  
+            • ⚖️ Compare against industry benchmarks
+            • 🎯 Optimize costs and assumptions
+            • 📋 Prepare for stakeholder presentations
+
+            What would you like to explore first?
+            """
+            st.session_state.chat_history.append(("assistant", welcome_msg))
+        
+        # Quick action buttons
+        st.markdown("**🚀 Quick Help:**")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            if st.button("💡 Explain My Results", key="explain_results"):
+                question = "Can you explain what my current ROI results mean and whether this is a good investment?"
+                st.session_state.pending_question = question
+        
+        with col2:
+            if st.button("📈 Improve My ROI", key="improve_roi"):
+                question = "How can I improve my ROI? What parameters should I focus on?"
+                st.session_state.pending_question = question
+        
+        with col3:
+            if st.button("⚖️ Industry Benchmark", key="benchmark"):
+                question = "How do my results compare to industry benchmarks for leadership programs?"
+                st.session_state.pending_question = question
+        
+        with col4:
+            if st.button("🎯 Optimize Costs", key="optimize_costs"):
+                question = "Which cost categories should I focus on to optimize my investment?"
+                st.session_state.pending_question = question
+        
+        st.divider()
+        
+        # Chat interface
+        st.markdown("**💬 Ask me anything about your ROI analysis:**")
+        
+        # Display chat history
+        for i, (role, message) in enumerate(st.session_state.chat_history):
+            if role == "user":
+                st.markdown(f"**🙋 You:** {message}")
+            else:
+                st.markdown(f"**🤖 Assistant:** {message}")
+            
+            if i < len(st.session_state.chat_history) - 1:
+                st.markdown("---")
+        
+        # Handle pending question from quick buttons
+        if hasattr(st.session_state, 'pending_question'):
+            question = st.session_state.pending_question
+            delattr(st.session_state, 'pending_question')
+            
+            # Add user question to history
+            st.session_state.chat_history.append(("user", question))
+            
+            # Get AI response
+            with st.spinner("🤖 Analyzing your question..."):
+                response = get_chatbot_response(question, st.session_state.params, results)
+                st.session_state.chat_history.append(("assistant", response))
+            
+            st.rerun()
+        
+        # Text input for custom questions
+        user_input = st.text_input(
+            "Type your question here:",
+            placeholder="e.g., 'What if I reduce the number of participants to 15?' or 'Explain discounted payback period'",
+            key="chat_input"
+        )
+        
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            send_button = st.button("Send 📤", type="primary")
+        with col2:
+            if st.button("Clear Chat 🗑️"):
+                st.session_state.chat_history = []
+                st.rerun()
+        
+        if send_button and user_input.strip():
+            # Add user question to history
+            st.session_state.chat_history.append(("user", user_input))
+            
+            # Get AI response
+            with st.spinner("🤖 Thinking..."):
+                response = get_chatbot_response(user_input, st.session_state.params, results)
+                st.session_state.chat_history.append(("assistant", response))
+            
+            st.rerun()
+        
+        # Helpful suggestions
+        if not st.session_state.chat_history:
+            st.markdown("""
+            **💡 Sample Questions to Get Started:**
+            - "What does my {:.1f}% ROI mean in practical terms?"
+            - "Why is my discounted payback longer than simple payback?"
+            - "What cost of capital should I use for a startup?"
+            - "How can I justify this investment to my CFO?"
+            - "What if economic conditions change?"
+            - "Should I run a pilot program first?"
+            - "What are the biggest risks in my assumptions?"
+            - "How do I measure success after implementation?"
+            """.format(results['kpis']['roi']))
+        
+        # Context panel
+        with st.expander("🔍 Current Analysis Context", expanded=False):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown(f"""
+                **Program Setup:**
+                - {params['participants']} participants
+                - {params['program_duration']} month duration
+                - {format_currency(params['avg_salary'])} avg salary
+                - {params['discount_rate']:.1f}% cost of capital
+                """)
+            
+            with col2:
+                st.markdown(f"""
+                **Key Results:**
+                - {results['kpis']['roi']:.1f}% ROI
+                - {results['kpis']['payback_months']:.1f} month payback
+                - {format_currency(results['kpis']['npv'])} NPV
+                - {results['kpis']['benefit_cost_ratio']:.1f}:1 BCR
+                """)
+        
+        # Pro tips
+        st.info("""
+        **💡 Pro Tips:**
+        - Ask specific questions about your numbers for better insights
+        - Use "What if..." questions to explore scenarios
+        - Ask for explanations of financial terms you don't understand
+        - Request industry comparisons and benchmarks
+        - Get help interpreting results for different stakeholders
+        """)
     
     # Export functionality
     st.divider()
