@@ -800,39 +800,47 @@ def main():
     
     # Initialize session state
     if 'params' not in st.session_state:
-        st.session_state.params = {
-            # Program Parameters
-            'participants': 20,
-            'program_duration': 6,
-            'avg_salary': 95000,
-            'time_commitment': 15,
-            'analysis_years': 3,
-            
-            # Program Costs
-            'facilitator_costs': 75000,
-            'materials_costs': 15000,
-            'venue_costs': 25000,
-            'travel_costs': 30000,
-            'technology_costs': 12000,
-            'assessment_costs': 8000,
-            
-            # Benefit Assumptions
-            'productivity_gain': 15,
-            'retention_improvement': 25,
-            'promotion_acceleration': 6,
-            'team_performance_gain': 12,
-            'decision_quality_gain': 20,
-            
-            # Industry Benchmarks
-            'current_turnover': 18,
-            'replacement_cost': 1.5,
-            'team_size': 8,
-            
-            # Financial Parameters
-            'discount_rate': 8.0,
-            'tax_rate': 25.0,
-            'inflation_rate': 3.0
-        }
+        st.session_state.params = {}
+    
+    # Ensure all parameters exist with defaults
+    default_params = {
+        # Program Parameters
+        'participants': 20,
+        'program_duration': 6,
+        'avg_salary': 95000,
+        'time_commitment': 15,
+        'analysis_years': 3,
+        
+        # Program Costs
+        'facilitator_costs': 75000,
+        'materials_costs': 15000,
+        'venue_costs': 25000,
+        'travel_costs': 30000,
+        'technology_costs': 12000,
+        'assessment_costs': 8000,
+        
+        # Benefit Assumptions
+        'productivity_gain': 15,
+        'retention_improvement': 25,
+        'promotion_acceleration': 6,
+        'team_performance_gain': 12,
+        'decision_quality_gain': 20,
+        
+        # Industry Benchmarks
+        'current_turnover': 18,
+        'replacement_cost': 1.5,
+        'team_size': 8,
+        
+        # Financial Parameters
+        'discount_rate': 8.0,
+        'tax_rate': 25.0,
+        'inflation_rate': 3.0
+    }
+    
+    # Update session state with any missing parameters
+    for key, value in default_params.items():
+        if key not in st.session_state.params:
+            st.session_state.params[key] = value
     
     # Sidebar for inputs
     with st.sidebar:
