@@ -304,9 +304,32 @@ def calculate_roi(params):
     
     mirr = calculate_mirr(cash_flows, discount_rate, discount_rate)
     
-    # Profitability Index
+    # Discounted Payback Period
+    def calculate_discounted_payback(cash_flows, discount_rate):
+        """Calculate discounted payback period in months"""
+        cumulative_pv = 0
+        monthly_discount_rate = discount_rate / 12
+        
+        # Convert annual cash flows to monthly
+        monthly_cash_flows = [cash_flows[0]]  # Initial investment
+        for i in range(1, len(cash_flows)):
+            monthly_benefit = cash_flows[i] / 12
+            for month in range(12):
+                monthly_cash_flows.append(monthly_benefit)
+        
+        for month, cash_flow in enumerate(monthly_cash_flows):
+            pv_cash_flow = cash_flow / ((1 + monthly_discount_rate) ** month)
+            cumulative_pv += pv_cash_flow
+            
+            if cumulative_pv >= 0 and month > 0:
+                return month
+        
+        return float('inf')  # Never pays back
+    
+    discounted_payback_months = calculate_discounted_payback(cash_flows, discount_rate)
+    
+    # Present value of benefits for BCR calculation
     present_value_benefits = sum(cash_flows[i] / (1 + discount_rate) ** i for i in range(1, len(cash_flows)))
-    profitability_index = present_value_benefits / total_program_costs if total_program_costs > 0 else 0
     
     benefit_cost_ratio = total_benefits / total_program_costs if total_program_costs > 0 else 0
     
@@ -333,12 +356,12 @@ def calculate_roi(params):
         'kpis': {
             'roi': roi,
             'payback_months': payback_months,
+            'discounted_payback_months': discounted_payback_months,
             'npv': npv,
             'net_benefit': net_benefit,
             'benefit_cost_ratio': benefit_cost_ratio,
             'irr': irr,
             'mirr': mirr,
-            'profitability_index': profitability_index,
             'cash_flows': cash_flows
         }
     }
@@ -552,12 +575,12 @@ def generate_pdf_report(params, results):
     kpi_data = [
         ['KPI', 'Value', 'Status'],
         ['Return on Investment', f"{results['kpis']['roi']:.0f}%", roi_status.replace('🟢 ', '').replace('🟡 ', '').replace('🟠 ', '').replace('🔴 ', '')],
-        ['Payback Period', f"{results['kpis']['payback_months']:.1f} months", payback_status.replace('🟢 ', '').replace('🟡 ', '').replace('🟠 ', '').replace('🔴 ', '')],
+        ['Simple Payback Period', f"{results['kpis']['payback_months']:.1f} months", payback_status.replace('🟢 ', '').replace('🟡 ', '').replace('🟠 ', '').replace('🔴 ', '')],
+        ['Discounted Payback Period', f"{results['kpis']['discounted_payback_months']:.1f} months" if results['kpis']['discounted_payback_months'] != float('inf') else 'Never', 'Fast' if results['kpis']['discounted_payback_months'] <= 18 else 'Moderate' if results['kpis']['discounted_payback_months'] <= 30 else 'Slow'],
         ['Net Present Value', format_currency(results['kpis']['npv']), 'Positive' if results['kpis']['npv'] > 0 else 'Negative'],
         ['Benefit-Cost Ratio', f"{results['kpis']['benefit_cost_ratio']:.1f}:1", 'Strong' if results['kpis']['benefit_cost_ratio'] >= 3 else 'Moderate' if results['kpis']['benefit_cost_ratio'] >= 2 else 'Weak'],
         ['Internal Rate of Return', f"{results['kpis']['irr']:.1f}%" if results['kpis']['irr'] else 'N/A', 'Above Hurdle' if results['kpis']['irr'] and results['kpis']['irr'] > params['discount_rate'] else 'Below Hurdle'],
-        ['Modified IRR', f"{results['kpis']['mirr']:.1f}%" if results['kpis']['mirr'] else 'N/A', 'Excellent' if results['kpis']['mirr'] and results['kpis']['mirr'] >= 20 else 'Good'],
-        ['Profitability Index', f"{results['kpis']['profitability_index']:.2f}", 'Excellent' if results['kpis']['profitability_index'] >= 1.5 else 'Good']
+        ['Modified IRR', f"{results['kpis']['mirr']:.1f}%" if results['kpis']['mirr'] else 'N/A', 'Excellent' if results['kpis']['mirr'] and results['kpis']['mirr'] >= 20 else 'Good']
     ]
     
     kpi_table = Table(kpi_data)
@@ -598,10 +621,11 @@ def generate_pdf_report(params, results):
     <b>Calculation Methods:</b><br/>
     • <b>ROI:</b> (Total Benefits - Total Costs) / Total Costs × 100%<br/>
     • <b>NPV:</b> Sum of discounted cash flows minus initial investment<br/>
+    • <b>Simple Payback:</b> Time to recover initial investment (nominal terms)<br/>
+    • <b>Discounted Payback:</b> Time to recover investment in present value terms<br/>
     • <b>IRR:</b> Discount rate that makes NPV equal to zero<br/>
     • <b>MIRR:</b> Modified IRR assuming reinvestment at cost of capital<br/>
-    • <b>Profitability Index:</b> Present value of benefits / Initial investment<br/>
-    • <b>Payback Period:</b> Time to recover initial investment<br/><br/>
+    • <b>Benefit-Cost Ratio:</b> Present value of benefits / Present value of costs<br/><br/>
     
     <b>Benefit Categories:</b><br/>
     • Productivity improvements from enhanced leadership skills<br/>
@@ -1137,13 +1161,16 @@ def main():
                 st.metric("Modified IRR", "N/A", delta="🔴 Cannot calculate")
         
         with col3:
-            pi = results['kpis']['profitability_index']
-            pi_status = "🟢 Excellent" if pi >= 1.5 else "🟡 Good" if pi >= 1.2 else "🟠 Moderate" if pi >= 1.0 else "🔴 Poor"
-            st.metric(
-                "Profitability Index",
-                f"{pi:.2f}",
-                delta=pi_status
-            )
+            dpb_months = results['kpis']['discounted_payback_months']
+            if dpb_months != float('inf'):
+                dpb_status = "🟢 Fast" if dpb_months <= 18 else "🟡 Moderate" if dpb_months <= 30 else "🟠 Slow"
+                st.metric(
+                    "Discounted Payback",
+                    f"{dpb_months:.1f} months",
+                    delta=dpb_status
+                )
+            else:
+                st.metric("Discounted Payback", "Never", delta="🔴 No payback")
         
         with col4:
             discount_rate = st.session_state.params['discount_rate']
@@ -1193,23 +1220,23 @@ def main():
             ```
             More realistic than IRR as it assumes reinvestment at the cost of capital.
             
+            **Payback Period (Simple)**
+            ```
+            Payback = Initial Investment / Annual Cash Flow
+            ```
+            Time required to recover the initial investment (ignores time value of money).
+            
+            **Discounted Payback Period**
+            ```
+            Cumulative PV of Cash Flows ≥ 0
+            ```
+            Time to recover investment using present value of cash flows (accounts for time value).
+            
             **Benefit-Cost Ratio (BCR)**
             ```
             BCR = Present Value of Benefits / Present Value of Costs
             ```
             Values > 1.0 indicate positive value creation.
-            
-            **Profitability Index (PI)**
-            ```
-            PI = Present Value of Future Cash Flows / Initial Investment
-            ```
-            Similar to BCR but focuses on cash flows vs. initial investment.
-            
-            **Payback Period**
-            ```
-            Payback = Initial Investment / Annual Cash Flow
-            ```
-            Time required to recover the initial investment.
             
             ### Key Assumptions:
             - **Cost of Capital:** {:.1f}% (Your organization's required return)
@@ -1325,15 +1352,24 @@ def main():
         
         scenario_data = []
         for scenario_name, multiplier in scenarios.items():
-            scenario_roi = results['kpis']['roi'] * multiplier
-            scenario_payback = results['kpis']['payback_months'] / multiplier
-            scenario_net_benefit = results['kpis']['net_benefit'] * multiplier
+            # Temporarily calculate with different scenario
+            temp_params = st.session_state.params.copy()
+            # Scale the benefit assumptions
+            temp_params['productivity_gain'] = temp_params['productivity_gain'] * multiplier
+            temp_params['retention_improvement'] = temp_params['retention_improvement'] * multiplier
+            temp_params['team_performance_gain'] = temp_params['team_performance_gain'] * multiplier
+            temp_params['decision_quality_gain'] = temp_params['decision_quality_gain'] * multiplier
+            temp_results = calculate_roi(temp_params)
+            
+            dpb = temp_results['kpis']['discounted_payback_months']
+            dpb_text = f"{dpb:.1f}" if dpb != float('inf') else "Never"
             
             scenario_data.append({
                 'Scenario': scenario_name,
-                'ROI (%)': f"{scenario_roi:.0f}%",
-                'Payback (months)': f"{scenario_payback:.1f}",
-                'Net Benefit': format_currency(scenario_net_benefit)
+                'ROI (%)': f"{temp_results['kpis']['roi']:.0f}%",
+                'Simple Payback (months)': f"{temp_results['kpis']['payback_months']:.1f}",
+                'Discounted Payback (months)': dpb_text,
+                'Net Benefit': format_currency(temp_results['kpis']['net_benefit'])
             })
         
         df_scenarios = pd.DataFrame(scenario_data)
@@ -1488,15 +1524,20 @@ def main():
     
     with col2:
         if st.button("📄 Export Summary (CSV)", type="secondary"):
+            dpb_value = f"{results['kpis']['discounted_payback_months']:.1f}" if results['kpis']['discounted_payback_months'] != float('inf') else "Never"
+            
             summary_data = {
-                'Metric': ['ROI (%)', 'Payback (months)', 'NPV ($)', 'Investment ($)', 'Annual Benefits ($)', 'Net Benefit ($)'],
+                'Metric': ['ROI (%)', 'Simple Payback (months)', 'Discounted Payback (months)', 'NPV ($)', 'Investment ($)', 'Annual Benefits ($)', 'Net Benefit ($)', 'IRR (%)', 'MIRR (%)'],
                 'Value': [
                     f"{results['kpis']['roi']:.1f}",
                     f"{results['kpis']['payback_months']:.1f}",
+                    dpb_value,
                     f"{results['kpis']['npv']:.0f}",
                     f"{results['costs']['total']:.0f}",
                     f"{results['benefits']['total_annual']:.0f}",
-                    f"{results['kpis']['net_benefit']:.0f}"
+                    f"{results['kpis']['net_benefit']:.0f}",
+                    f"{results['kpis']['irr']:.1f}" if results['kpis']['irr'] else "N/A",
+                    f"{results['kpis']['mirr']:.1f}" if results['kpis']['mirr'] else "N/A"
                 ]
             }
             df_summary = pd.DataFrame(summary_data)
