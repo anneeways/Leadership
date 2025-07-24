@@ -125,7 +125,7 @@ INDUSTRY_TEMPLATES = {
 
 def format_currency(amount):
     """Format amount as currency"""
-    return f"€{amount:,.0f}"
+    return f"${amount:,.0f}"
 
 def format_percentage(value):
     """Format value as percentage"""
@@ -155,7 +155,7 @@ def get_payback_color_status(months):
 
 def calculate_roi(params):
     """Calculate ROI and related metrics"""
-    # Programme Costs
+    # Program Costs
     participant_time_cost = (
         params['participants'] * 
         (params['avg_salary'] * 1.3 / 12) * 
@@ -163,7 +163,7 @@ def calculate_roi(params):
         params['program_duration']
     )
     
-    total_programme_costs = (
+    total_program_costs = (
         params['facilitator_costs'] + params['materials_costs'] + 
         params['venue_costs'] + params['travel_costs'] + 
         params['technology_costs'] + params['assessment_costs'] + 
@@ -257,7 +257,7 @@ def get_ai_insights(results, params):
     prompt = f"""
     Analyze this leadership development program ROI calculation and provide insights:
     
-    Programme Details:
+    Program Details:
     - Participants: {params['participants']}
     - Duration: {params['program_duration']} months
     - Investment: {format_currency(results['costs']['total'])}
